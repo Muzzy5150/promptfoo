@@ -1,4 +1,6 @@
 import { createTokenOutput } from '../factories/literalFixtures';
+
+import type { EvalConversations } from '../../src/types/index';
 import './setup';
 
 import { getEventListeners } from 'node:events';
@@ -781,46 +783,39 @@ describe('runEval', () => {
     );
   });
 
-  it('should store output in register when specified', async () => {
-    const registers = {};
-
-    const results = await runEval({
-      ...defaultOptions,
-      provider: mockProvider,
-      prompt: { raw: 'Test prompt', label: 'test-label' },
-      test: { options: { storeOutputAs: 'myOutput' } },
-      conversations: {},
-      registers,
-    });
-    const result = results[0];
-    expect(result.success).toBe(true);
-    expect(registers).toHaveProperty('myOutput', 'Test output');
-  });
-
-  it.each([0, false, ''])(
-    'preserves falsy provider output in evaluation state: %j',
+  it.each(['Test output', 0, false, ''])(
+    'retains output %j in the register and conversation',
     async (output) => {
-      const provider: ApiProvider = {
-        id: () => 'falsy-output-provider',
-        callApi: vi.fn().mockResolvedValue({ output }),
-      };
-      const conversations = {} as Record<string, any>;
       const registers = {};
-
+      const conversations: EvalConversations = {};
+      vi.mocked(mockProvider.callApi).mockResolvedValueOnce({ output });
       const [result] = await runEval({
         ...defaultOptions,
-        provider,
+        provider: mockProvider,
         prompt: { raw: 'Test prompt', label: 'test-label' },
         test: { options: { storeOutputAs: 'myOutput' } },
         conversations,
         registers,
       });
-
       expect(result.success).toBe(true);
-      expect(registers).toHaveProperty('myOutput', output);
+      expect(registers).toEqual({ myOutput: output });
       expect(Object.values(conversations)[0][0].output).toBe(output);
     },
   );
+
+  it.each([null, undefined])('retains the previous register when output is %s', async (output) => {
+    const registers = { myOutput: 'previous' };
+    vi.mocked(mockProvider.callApi).mockResolvedValueOnce({ output });
+    const [result] = await runEval({
+      ...defaultOptions,
+      provider: mockProvider,
+      prompt: { raw: 'Test prompt', label: 'test-label' },
+      test: { options: { storeOutputAs: 'myOutput' } },
+      registers,
+    });
+    expect(result.success).toBe(false);
+    expect(registers.myOutput).toBe('previous');
+  });
 
   it('should handle provider errors', async () => {
     const errorProvider: ApiProvider = {
