@@ -94,11 +94,9 @@ function getStdioEnv(server: MCPServerConfig): Record<string, string> {
   return server.env ? { ...parentEnv, ...server.env } : parentEnv;
 }
 
-async function loadMcpClientSdk(): Promise<
-  typeof import('@modelcontextprotocol/sdk/client/index.js')
-> {
+async function loadMcpClientSdk() {
   try {
-    return await import('@modelcontextprotocol/sdk/client/index.js');
+    return await import('./sdkClient');
   } catch (error) {
     if (isMissingPackageImportError(error, '@modelcontextprotocol/sdk')) {
       throw new Error(
@@ -210,9 +208,9 @@ export class MCPClient {
     signal: AbortSignal,
   ): Promise<void> {
     signal.throwIfAborted();
-    const { Client } = await loadMcpClientSdk();
+    const { PaginatedMcpClient } = await loadMcpClientSdk();
     signal.throwIfAborted();
-    const client = new Client({
+    const client = new PaginatedMcpClient({
       name: 'promptfoo-MCP',
       version: '1.0.0',
       description: 'Promptfoo MCP client for connecting to MCP servers during LLM evaluations',
@@ -353,7 +351,13 @@ export class MCPClient {
         }
       }
 
-      const serverTools = await this.listServerTools(client, requestOptions, signal);
+      const toolsResult = await client.listTools(undefined, requestOptions);
+      const serverTools =
+        toolsResult?.tools?.map((tool) => ({
+          name: tool.name,
+          description: tool.description || '',
+          inputSchema: tool.inputSchema,
+        })) || [];
 
       // Filter tools if specified
       let filteredTools = serverTools;
@@ -393,41 +397,6 @@ export class MCPClient {
       throw new Error(`Failed to connect to MCP server ${serverKey}: ${errorMessage}`);
     } finally {
       this.pendingConnections.delete(close);
-    }
-  }
-
-  private async listServerTools(
-    client: Client,
-    requestOptions: MCPRequestOptions,
-    signal: AbortSignal,
-  ): Promise<MCPTool[]> {
-    const tools: MCPTool[] = [];
-    const seenCursors = new Set<string>();
-    let cursor: string | undefined;
-
-    while (true) {
-      signal.throwIfAborted();
-      const result = await client.listTools(
-        cursor === undefined ? undefined : { cursor },
-        requestOptions,
-      );
-      tools.push(
-        ...result.tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description || '',
-          inputSchema: tool.inputSchema,
-        })),
-      );
-
-      const nextCursor = result.nextCursor;
-      if (nextCursor === undefined) {
-        return tools;
-      }
-      if (seenCursors.has(nextCursor)) {
-        throw new Error('MCP server returned a repeated tools/list pagination cursor');
-      }
-      seenCursors.add(nextCursor);
-      cursor = nextCursor;
     }
   }
 
